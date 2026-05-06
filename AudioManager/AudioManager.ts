@@ -3,22 +3,37 @@
  * author: Hotaru
  * 2024/04/06
  */
-import { _decorator, AudioClip, AudioSource, Component, director, Node } from 'cc';
+import { _decorator, AudioClip, AudioSource, Component, director, Node, isValid } from 'cc';
 import { BundleManager } from '../BundleManager/BundleManager';
 
 export class AudioManager
 {
     private parent:Node|null = null;
     private static instance:AudioManager|null = null;
+    private static readonly audioNodeName = '__audioMgr__';
     private audioSource:AudioSource|null = null;
-    private static audioClips:AudioClip[]=[];
+    private static readonly audioClips:Map<string, AudioClip> = new Map();
 
     public Init(parent:Node) {
-        let audioMgr = new Node();
-        audioMgr.name = '__audioMgr__';
-        director.getScene()!.addChild(audioMgr);
-        director.addPersistRootNode(audioMgr);
-        this.audioSource = audioMgr.addComponent(AudioSource);
+        this.parent = parent;
+        if (this.audioSource && isValid(this.audioSource.node)) {
+            return;
+        }
+
+        const scene = director.getScene();
+        if (!scene) {
+            throw new Error('AudioManager.Init failed: scene is unavailable');
+        }
+
+        let audioMgr = scene.getChildByName(AudioManager.audioNodeName);
+        if (!audioMgr || !isValid(audioMgr)) {
+            audioMgr = new Node();
+            audioMgr.name = AudioManager.audioNodeName;
+            scene.addChild(audioMgr);
+            director.addPersistRootNode(audioMgr);
+        }
+
+        this.audioSource = audioMgr.getComponent(AudioSource) ?? audioMgr.addComponent(AudioSource);
     }
     
     public static get Instance() {
@@ -71,19 +86,30 @@ export class AudioManager
         this.audioSource?.play();
     }
 
-    private async FoundClips(_name:string) {
-        let ads=_name.split('/');
-        for(let i=0 ; i<AudioManager.audioClips.length ; i++) {
-            if(AudioManager.audioClips[i].name == ads[1]) {
-                return AudioManager.audioClips[i];
-            }
+    private ParseClipPath(resource:string) {
+        const splitIndex = resource.indexOf('/');
+        if (splitIndex <= 0 || splitIndex >= resource.length - 1) {
+            throw new Error(`AudioManager.FoundClips invalid resource path: ${resource}`);
         }
 
-        let clip = await BundleManager.Instance.LoadAssetsFromBundle(ads[0], ads[1]) as AudioClip;
-        AudioManager.audioClips.push(clip);
+        return {
+            bundleName: resource.slice(0, splitIndex),
+            assetPath: resource.slice(splitIndex + 1),
+            cacheKey: resource,
+        };
+    }
+
+    private async FoundClips(_name:string) {
+        const { bundleName, assetPath, cacheKey } = this.ParseClipPath(_name);
+        const cachedClip = AudioManager.audioClips.get(cacheKey);
+        if (cachedClip) {
+            return cachedClip;
+        }
+
+        let clip = await BundleManager.Instance.LoadAssetsFromBundle(bundleName, assetPath) as AudioClip;
+        AudioManager.audioClips.set(cacheKey, clip);
 
         return clip;
     }
 }
-
 

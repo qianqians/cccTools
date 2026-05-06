@@ -4,6 +4,8 @@ import { BundleManager } from '../BundleManager/BundleManager';
 
 export class UIManager {
     private parent:Node|null = null;
+    private pageRequestVersion:number = 0;
+    private boraderRequestVersion:number = 0;
 
     public CurrPageName:string = "";
     public CurrPage:Node|null = null;
@@ -28,13 +30,24 @@ export class UIManager {
             return;
         }
 
+        if (!this.parent) {
+            throw new Error("UIManager.OpenPage failed: parent is not initialized");
+        }
+
+        const requestVersion = ++this.pageRequestVersion;
         let old = this.CurrPage;
 
         let bundle = await BundleManager.Instance.LoadAssetsFromBundle(bundleName, pageName) as Prefab;
+        if (requestVersion !== this.pageRequestVersion) {
+            return;
+        }
+
         let node = instantiate(bundle);
         node.setParent(this.parent);
         this.CurrPage = node;
         this.CurrPageName = pageName;
+        this.currBorader = null;
+        this.currboraderName = "";
 
         if(old) {
             old.destroy();
@@ -42,6 +55,9 @@ export class UIManager {
     }
 
     public ClosePage() {
+        this.pageRequestVersion++;
+        this.boraderRequestVersion++;
+        this.CloseBorader();
         if(this.CurrPage) {
             this.CurrPage.destroy();
             this.CurrPage = null;
@@ -55,9 +71,23 @@ export class UIManager {
             return;
         }
 
+        if (!this.CurrPage) {
+            throw new Error(`UIManager.OpenBorader failed: current page is unavailable for ${boraderName}`);
+        }
+
+        const requestVersion = ++this.boraderRequestVersion;
+        const parentPage = this.CurrPage;
         let old = this.currBorader;
 
         let bundle = await BundleManager.Instance.LoadAssetsFromBundle(bundleName, boraderName) as Prefab;
+        if (requestVersion !== this.boraderRequestVersion) {
+            return;
+        }
+
+        if (!this.CurrPage || this.CurrPage !== parentPage) {
+            throw new Error(`UIManager.OpenBorader failed: current page changed while opening ${boraderName}`);
+        }
+
         let node = instantiate(bundle);
         node.setParent(this.CurrPage);
         this.currBorader = node;
@@ -69,6 +99,7 @@ export class UIManager {
     }
 
     public CloseBorader() {
+        this.boraderRequestVersion++;
         if(this.currBorader) {
             this.currBorader.destroy();
             this.currBorader = null;

@@ -28,7 +28,7 @@ export class BundleManager
                 assetManager.loadBundle(bundleRes, (error,bundle) => {
                     if(error) {
                         console.warn(error.message);
-                        reject();
+                        reject(error);
                     }
                     else {
                         this.bundles.set(bundleRes, bundle);
@@ -38,7 +38,7 @@ export class BundleManager
             }
             catch (err) {
                 console.warn(this.res+"下的 loadAssets 错误:"+err);
-                reject();
+                reject(err);
             }    
         });
     }
@@ -51,7 +51,7 @@ export class BundleManager
                 bundle.load(assetsRes, Asset, (error, asset) => {
                     if(error) {
                         console.warn(`loadAssets '${bundleRes}' '${assetsRes}' error:`, error.message);
-                        reject();
+                        reject(error);
                     }
                     else {
                         resolve(asset);
@@ -60,7 +60,7 @@ export class BundleManager
             }
             catch (err) {
                 console.error(this.res+"下的 loadAssetsFromBundle 错误:"+err);
-                reject();
+                reject(err);
             }    
         });
     }
@@ -71,7 +71,7 @@ export class BundleManager
                 assetManager.loadRemote(url, {ext:_ext}, (err:Error|null, asset:Asset) => {
                     if (err) {
                         console.log(err.message);
-                        reject();
+                        reject(err);
                     } 
                     else {
                         resolve(asset);
@@ -80,7 +80,7 @@ export class BundleManager
             }
             catch (err) {
                 console.warn(this.res+"下的 loadAssets 错误:"+err);
-                reject();
+                reject(err);
             }    
         });
     }
@@ -117,7 +117,7 @@ export class BundleManager
             }, async (err, data) => {
                 if (err) {
                     console.warn("预下载 ",bundle,"/",_res," 错误 ",err);
-                    resolve();
+                    reject(err);
                 }
                 else {
                     if(_complete) {
@@ -129,5 +129,4 @@ export class BundleManager
         })
     }
 }
-
 
