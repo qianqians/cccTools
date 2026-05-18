@@ -2,9 +2,8 @@ export function Sleep(ms: number): Promise<void>
 {
     return new Promise((resolve) => 
     {
-        let st = setTimeout(() => 
+        setTimeout(() => 
         {
-            clearTimeout(st);
             resolve();
         }, ms);
     });
@@ -12,13 +11,17 @@ export function Sleep(ms: number): Promise<void>
 
 export function Delay(ms: number, release: () => void): Promise<void> 
 {
-    return new Promise((resolve) =>
+    return new Promise((resolve, reject) =>
     {
-        let st = setTimeout(async () =>
+        setTimeout(async () =>
         {
-            clearTimeout(st);
-            await release();
-            resolve();
+            try {
+                await release();
+                resolve();
+            }
+            catch (err) {
+                reject(err);
+            }
         }, ms);
     });
 }

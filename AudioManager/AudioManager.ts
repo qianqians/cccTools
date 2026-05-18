@@ -3,19 +3,18 @@
  * author: Hotaru
  * 2024/04/06
  */
-import { _decorator, AudioClip, AudioSource, Component, director, Node, isValid } from 'cc';
+import { AudioClip, AudioSource, director, Node, isValid } from 'cc';
 import { BundleManager } from '../BundleManager/BundleManager';
 
 export class AudioManager
 {
-    private parent:Node|null = null;
     private static instance:AudioManager|null = null;
     private static readonly audioNodeName = '__audioMgr__';
     private audioSource:AudioSource|null = null;
     private static readonly audioClips:Map<string, AudioClip> = new Map();
+    private static readonly loadingAudioClips:Map<string, Promise<AudioClip>> = new Map();
 
-    public Init(parent:Node) {
-        this.parent = parent;
+    public Init(_parent?:Node) {
         if (this.audioSource && isValid(this.audioSource.node)) {
             return;
         }
@@ -48,21 +47,29 @@ export class AudioManager
     }
 
     public async PlaySound(sound: AudioClip | string, volume: number = 1.0) {
+        return this.PlayMusic(sound, volume);
+    }
+
+    public async PlayMusic(sound: AudioClip | string, volume: number = 1.0) {
         try {
             let clip = sound instanceof AudioClip ? sound : await this.FoundClips(sound);
             if (this.audioSource != null && clip != null) {
                 this.audioSource.stop();
                 this.audioSource.clip = clip;
-                this.audioSource.play();
                 this.audioSource.volume = volume;
+                this.audioSource.play();
             }
         }
        catch(error) {
-            console.error('AudioManager 下 PlaySound 错误 err: ',error);
+            console.error('AudioManager 下 PlayMusic 错误 err: ',error);
        }
     }
 
     public async PlayerOnShot(sound: AudioClip | string, volume: number = 1.0) {
+        return this.PlaySfx(sound, volume);
+    }
+
+    public async PlaySfx(sound: AudioClip | string, volume: number = 1.0) {
         try {
             let clip = sound instanceof AudioClip ? sound : await this.FoundClips(sound);
             if (this.audioSource != null && clip != null) {
@@ -70,12 +77,16 @@ export class AudioManager
             }
         }
         catch(error) {
-            console.error('AudioManager 下 PlayerOnShot 错误 err: ',error);
+            console.error('AudioManager 下 PlaySfx 错误 err: ',error);
         }
     }
 
     public Stop() {
         this.audioSource?.stop();
+    }
+
+    public StopMusic() {
+        this.Stop();
     }
 
     public Pause() {
@@ -102,14 +113,28 @@ export class AudioManager
     private async FoundClips(_name:string) {
         const { bundleName, assetPath, cacheKey } = this.ParseClipPath(_name);
         const cachedClip = AudioManager.audioClips.get(cacheKey);
-        if (cachedClip) {
+        if (cachedClip && isValid(cachedClip)) {
             return cachedClip;
         }
 
-        let clip = await BundleManager.Instance.LoadAssetsFromBundle(bundleName, assetPath) as AudioClip;
-        AudioManager.audioClips.set(cacheKey, clip);
+        let loadingClip = AudioManager.loadingAudioClips.get(cacheKey);
+        if (loadingClip) {
+            return loadingClip;
+        }
 
-        return clip;
+        loadingClip = BundleManager.Instance
+            .LoadAssetFromBundle<AudioClip>(bundleName, assetPath, AudioClip)
+            .then((clip) => {
+                AudioManager.audioClips.set(cacheKey, clip);
+                AudioManager.loadingAudioClips.delete(cacheKey);
+                return clip;
+            })
+            .catch((err) => {
+                AudioManager.loadingAudioClips.delete(cacheKey);
+                throw err;
+            });
+
+        AudioManager.loadingAudioClips.set(cacheKey, loadingClip);
+        return loadingClip;
     }
 }
-

@@ -1,10 +1,12 @@
-import { __private, _decorator, Asset, assetManager, AssetManager, isValid } from 'cc';
+import { Asset, assetManager, AssetManager, isValid } from 'cc';
 import { Sleep } from '../Other/Sleep';
 
 export class BundleManager
 {
     private res:string="script/BundleManager/BundleManager.ts";
     private bundles:Map<string, AssetManager.Bundle> = new Map();
+    private loadingBundles:Map<string, Promise<AssetManager.Bundle>> = new Map();
+    private loadingAssets:Map<string, Promise<Asset>> = new Map();
 
     public static _instance:BundleManager;
     static get Instance():BundleManager {
@@ -14,55 +16,82 @@ export class BundleManager
     }
     
     private loadBundle(bundleRes:string) : Promise<AssetManager.Bundle> {
-        return new Promise((resolve, reject) => {
-            try {
-                if(this.bundles.has(bundleRes))
-                {
-                    let bundle = this.bundles.get(bundleRes);
-                    if (bundle) {
-                        resolve(bundle);
-                        return;
-                    }
-                }
+        let bundle = this.bundles.get(bundleRes);
+        if (bundle) {
+            return Promise.resolve(bundle);
+        }
 
+        let loadingBundle = this.loadingBundles.get(bundleRes);
+        if (loadingBundle) {
+            return loadingBundle;
+        }
+
+        loadingBundle = new Promise((resolve, reject) => {
+            try {
                 assetManager.loadBundle(bundleRes, (error,bundle) => {
                     if(error) {
                         console.warn(error.message);
+                        this.loadingBundles.delete(bundleRes);
                         reject(error);
+                    }
+                    else if (!bundle) {
+                        this.loadingBundles.delete(bundleRes);
+                        reject(new Error(`loadBundle '${bundleRes}' returned empty bundle`));
                     }
                     else {
                         this.bundles.set(bundleRes, bundle);
+                        this.loadingBundles.delete(bundleRes);
                         resolve(bundle);
                     }
                 });
             }
             catch (err) {
                 console.warn(this.res+"下的 loadAssets 错误:"+err);
+                this.loadingBundles.delete(bundleRes);
                 reject(err);
             }    
         });
+
+        this.loadingBundles.set(bundleRes, loadingBundle);
+        return loadingBundle;
     }
 
-    public LoadAssetsFromBundle(bundleRes:string, assetsRes:string) : Promise<Asset> {   
-        return new Promise(async (resolve, reject) => {
+    public LoadAssetFromBundle<T extends Asset>(bundleRes:string, assetsRes:string, assetType:any) : Promise<T> {
+        const cacheKey = `${bundleRes}/${assetsRes}/${assetType?.name ?? 'Asset'}`;
+        const loadingAsset = this.loadingAssets.get(cacheKey);
+        if (loadingAsset) {
+            return loadingAsset as Promise<T>;
+        }
+
+        const promise = new Promise<T>(async (resolve, reject) => {
             try {
                 let bundle = await this.loadBundle(bundleRes);
-                
-                bundle.load(assetsRes, Asset, (error, asset) => {
+
+                bundle.load(assetsRes, assetType, (error, asset) => {
                     if(error) {
                         console.warn(`loadAssets '${bundleRes}' '${assetsRes}' error:`, error.message);
+                        this.loadingAssets.delete(cacheKey);
                         reject(error);
                     }
                     else {
-                        resolve(asset);
+                        this.loadingAssets.delete(cacheKey);
+                        resolve(asset as T);
                     }
                 });
             }
             catch (err) {
-                console.error(this.res+"下的 loadAssetsFromBundle 错误:"+err);
+                console.error(this.res+"下的 loadAssetFromBundle 错误:"+err);
+                this.loadingAssets.delete(cacheKey);
                 reject(err);
-            }    
+            }
         });
+
+        this.loadingAssets.set(cacheKey, promise as Promise<Asset>);
+        return promise;
+    }
+
+    public LoadAssetsFromBundle(bundleRes:string, assetsRes:string) : Promise<Asset> {   
+        return this.LoadAssetFromBundle<Asset>(bundleRes, assetsRes, Asset);
     }
 
     public LoadAssetsFromUrl(url:string, _ext:string) : Promise<Asset> {
@@ -85,48 +114,60 @@ export class BundleManager
         });
     }
 
-    public async PreLoadBundleDir(_bundle:string,_res:string,_callBack?:((bundleName:string,progress:number)=>void)|null, _complete?:(()=>void)|null) {
+    public PreLoadBundleDir(_bundle:string,_res:string,_callBack?:((bundleName:string,progress:number)=>void)|null, _complete?:(()=>void)|null) {
         return new Promise<void>(async (resolve, reject) => {
-            let bundle = await this.loadBundle(_bundle);
-            let info = bundle.getDirWithPath(_res);
-            if (info) {
-                let n = 0;
-                for (let t of info) {
-                    let uuid = t.uuid;
-                    let cachedAsset = assetManager.assets.get(uuid)
-                    if (cachedAsset && isValid(cachedAsset)) {
-                        n++;
-                    }
-                }
-                if (n == info.length) {
-                    if (_callBack) {
-                        for(let i=0; i < 10; i++) {
-                            await Sleep(333);
-                            _callBack(_bundle, 90+i);
+            try {
+                let bundle = await this.loadBundle(_bundle);
+                let info = bundle.getDirWithPath(_res);
+                if (info && info.length > 0) {
+                    let n = 0;
+                    for (let t of info) {
+                        let uuid = t.uuid;
+                        let cachedAsset = assetManager.assets.get(uuid)
+                        if (cachedAsset && isValid(cachedAsset)) {
+                            n++;
                         }
                     }
-                    resolve();
-                    return;
-                }
-            }
-
-            bundle.preloadDir(_res, null, (finished, total, item) => {
-                if (_callBack) {
-                    _callBack(_bundle, Math.floor(finished / total * 100));
-                }
-            }, async (err, data) => {
-                if (err) {
-                    console.warn("预下载 ",bundle,"/",_res," 错误 ",err);
-                    reject(err);
-                }
-                else {
-                    if(_complete) {
-                        _complete();
+                    if (n == info.length) {
+                        if (_callBack) {
+                            await Sleep(333);
+                            _callBack(_bundle, 100);
+                        }
+                        if(_complete) {
+                            _complete();
+                        }
+                        resolve();
+                        return;
                     }
-                    resolve();
                 }
-            });
+
+                bundle.preloadDir(_res, null, (finished, total, item) => {
+                    if (_callBack) {
+                        const progress = total > 0 ? Math.floor(finished / total * 100) : 100;
+                        _callBack(_bundle, progress);
+                    }
+                }, (err, data) => {
+                    if (err) {
+                        console.warn("预下载 ",bundle,"/",_res," 错误 ",err);
+                        reject(err);
+                    }
+                    else {
+                        try {
+                            if(_complete) {
+                                _complete();
+                            }
+                            resolve();
+                        }
+                        catch (completeErr) {
+                            reject(completeErr);
+                        }
+                    }
+                });
+            }
+            catch (err) {
+                console.warn("预下载 ",_bundle,"/",_res," 错误 ",err);
+                reject(err);
+            }
         })
     }
 }
-
