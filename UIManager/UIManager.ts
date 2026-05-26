@@ -11,17 +11,13 @@ type UIControllerCreator = () => IUIController;
 
 export class UIManager {
     private parent:Node|null = null;
-    private pageRequestVersion:number = 0;
-    private boraderRequestVersion:number = 0;
-    private openingPageName:string = "";
-    private openingBoraderName:string = "";
 
     public CurrPageName:string = "";
     public CurrPage:Node|null = null;
     private currPageController:IUIController|null = null;
 
-    private currBorader:Node|null = null;
-    public currboraderName:string = "";
+    private CurrBorader:Node|null = null;
+    public CurrboraderName:string = "";
     private currBoraderController:IUIController|null = null;
 
     private pageControllerCreators:Map<string, UIControllerCreator> = new Map();
@@ -109,7 +105,7 @@ export class UIManager {
      * 因为是同步操作，不会出现异步回调中界面在不适当场景弹出的问题。
      */
     public ShowBorader(boraderName:string, prefab:Prefab, data?:unknown): void {
-        if(this.currboraderName == boraderName) {
+        if(this.CurrboraderName == boraderName) {
             console.warn("当前界面已打开:"+boraderName);
             return;
         }
@@ -118,8 +114,8 @@ export class UIManager {
             throw new Error(`UIManager.ShowBorader failed: current page is unavailable for ${boraderName}`);
         }
 
-        const old = this.currBorader;
-        const oldBoraderName = this.currboraderName;
+        const old = this.CurrBorader;
+        const oldBoraderName = this.CurrboraderName;
         const oldController = this.currBoraderController;
 
         const node = instantiate(prefab);
@@ -135,8 +131,8 @@ export class UIManager {
             return;
         }
 
-        this.currBorader = node;
-        this.currboraderName = boraderName;
+        this.CurrBorader = node;
+        this.CurrboraderName = boraderName;
         this.currBoraderController = controller;
 
         this.CloseController(oldController, oldBoraderName);
@@ -145,70 +141,7 @@ export class UIManager {
         }
     }
     
-    public async OpenPage(pageName:string, bundleName:string, data?:unknown) {
-        if(this.CurrPageName == pageName || this.openingPageName == pageName) {
-            console.warn("当前页面已打开或正在打开:"+pageName);
-            return;
-        }
-
-        if (!this.parent) {
-            throw new Error("UIManager.OpenPage failed: parent is not initialized");
-        }
-
-        const requestVersion = ++this.pageRequestVersion;
-        this.openingPageName = pageName;
-        const old = this.CurrPage;
-        const oldPageName = this.CurrPageName;
-        const oldController = this.currPageController;
-
-        try {
-            let bundle = await BundleManager.Instance.LoadAssetsFromBundle(bundleName, pageName) as Prefab;
-            if (requestVersion !== this.pageRequestVersion) {
-                return;
-            }
-
-            let node = instantiate(bundle);
-            node.setParent(this.parent);
-            const controller = this.CreatePageController(pageName);
-            try {
-                controller?.OnOpen?.(node, data);
-            }
-            catch (err) {
-                console.error("UIManager.OpenPage controller OnOpen failed:", pageName, err);
-                node.destroy();
-                return;
-            }
-
-            if (requestVersion !== this.pageRequestVersion) {
-                this.CloseController(controller, pageName);
-                node.destroy();
-                return;
-            }
-
-            this.CloseBorader();
-            this.CurrPage = node;
-            this.CurrPageName = pageName;
-            this.currPageController = controller;
-
-            this.CloseController(oldController, oldPageName);
-            if(old) {
-                old.destroy();
-            }
-        }
-        catch (err) {
-            console.error("UIManager.OpenPage failed:", pageName, err);
-        }
-        finally {
-            if (requestVersion === this.pageRequestVersion) {
-                this.openingPageName = "";
-            }
-        }
-    }
-
     public ClosePage() {
-        this.pageRequestVersion++;
-        this.boraderRequestVersion++;
-        this.openingPageName = "";
         this.CloseBorader();
         this.CloseController(this.currPageController, this.CurrPageName);
         this.currPageController = null;
@@ -219,79 +152,13 @@ export class UIManager {
         }
     }
 
-    public async OpenBorader(boraderName:string, bundleName:string, data?:unknown) {
-        if(this.currboraderName == boraderName || this.openingBoraderName == boraderName) {
-            console.warn("当前界面已打开或正在打开:"+boraderName);
-            return;
-        }
-
-        if (!this.CurrPage) {
-            throw new Error(`UIManager.OpenBorader failed: current page is unavailable for ${boraderName}`);
-        }
-
-        const requestVersion = ++this.boraderRequestVersion;
-        this.openingBoraderName = boraderName;
-        const parentPage = this.CurrPage;
-        let old = this.currBorader;
-        const oldBoraderName = this.currboraderName;
-        const oldController = this.currBoraderController;
-
-        try {
-            let bundle = await BundleManager.Instance.LoadAssetsFromBundle(bundleName, boraderName) as Prefab;
-            if (requestVersion !== this.boraderRequestVersion) {
-                return;
-            }
-
-            if (!this.CurrPage || this.CurrPage !== parentPage) {
-                throw new Error(`UIManager.OpenBorader failed: current page changed while opening ${boraderName}`);
-            }
-
-            let node = instantiate(bundle);
-            node.setParent(this.CurrPage);
-            const controller = this.CreateBoraderController(boraderName);
-            try {
-                controller?.OnOpen?.(node, data);
-            }
-            catch (err) {
-                console.error("UIManager.OpenBorader controller OnOpen failed:", boraderName, err);
-                node.destroy();
-                return;
-            }
-
-            if (requestVersion !== this.boraderRequestVersion) {
-                this.CloseController(controller, boraderName);
-                node.destroy();
-                return;
-            }
-
-            this.currBorader = node;
-            this.currboraderName = boraderName;
-            this.currBoraderController = controller;
-
-            this.CloseController(oldController, oldBoraderName);
-            if(old) {
-                old.destroy();
-            }
-        }
-        catch (err) {
-            console.error("UIManager.OpenBorader failed:", boraderName, err);
-        }
-        finally {
-            if (requestVersion === this.boraderRequestVersion) {
-                this.openingBoraderName = "";
-            }
-        }
-    }
-
     public CloseBorader() {
-        this.boraderRequestVersion++;
-        this.openingBoraderName = "";
-        this.CloseController(this.currBoraderController, this.currboraderName);
+        this.CloseController(this.currBoraderController, this.CurrboraderName);
         this.currBoraderController = null;
-        if(this.currBorader) {
-            this.currBorader.destroy();
-            this.currBorader = null;
-            this.currboraderName = "";
+        if(this.CurrBorader) {
+            this.CurrBorader.destroy();
+            this.CurrBorader = null;
+            this.CurrboraderName = "";
         }
     }
 

@@ -31,7 +31,10 @@ class HomePageController implements IUIController {
 }
 
 UIManager.Instance.RegisterPageController('HomePage', () => new HomePageController());
-UIManager.Instance.OpenPage('HomePage', 'main', { title: 'home' });
+
+// 先加载资源，再同步展示
+const prefab = await UIManager.Instance.LoadPage('HomePage', 'main');
+UIManager.Instance.ShowPage('HomePage', prefab, { title: 'home' });
 ```
 
-通过静态 import 注册的 controller 会进入首包代码；prefab、图片、音频等资源继续放在 bundle 中按需加载。
+通过静态 import 注册的 controller 会进入首包代码；prefab、图片、音频等资源继续放在 bundle 中按需加载。页面展示采用 LoadPage + ShowPage 分离模式：LoadPage 异步加载资源返回 Prefab，ShowPage 同步创建展示页面，避免异步回调中页面在不适当场景弹出。
