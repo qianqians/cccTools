@@ -7,6 +7,8 @@ export class BundleManager
     private bundles:Map<string, AssetManager.Bundle> = new Map();
     private loadingBundles:Map<string, Promise<AssetManager.Bundle>> = new Map();
     private loadingAssets:Map<string, Promise<Asset>> = new Map();
+    /** 已完成加载的 Asset 缓存，key 与 loadingAssets 相同 */
+    private cachedAssets:Map<string, Asset> = new Map();
 
     public static _instance:BundleManager;
     static get Instance():BundleManager {
@@ -58,6 +60,14 @@ export class BundleManager
 
     public LoadAssetFromBundle<T extends Asset>(bundleRes:string, assetsRes:string, assetType:any) : Promise<T> {
         const cacheKey = `${bundleRes}/${assetsRes}/${assetType?.name ?? 'Asset'}`;
+
+        // 命中已加载缓存，立即同步返回
+        const cached = this.cachedAssets.get(cacheKey);
+        if (cached && isValid(cached)) {
+            return Promise.resolve(cached as T);
+        }
+
+        // 正在加载中，复用同一个 Promise
         const loadingAsset = this.loadingAssets.get(cacheKey);
         if (loadingAsset) {
             return loadingAsset as Promise<T>;
@@ -75,6 +85,7 @@ export class BundleManager
                     }
                     else {
                         this.loadingAssets.delete(cacheKey);
+                        this.cachedAssets.set(cacheKey, asset);
                         resolve(asset as T);
                     }
                 });
@@ -88,6 +99,21 @@ export class BundleManager
 
         this.loadingAssets.set(cacheKey, promise as Promise<Asset>);
         return promise;
+    }
+
+    /**
+     * 释放某个已缓存的 Asset（当页面长期不使用时可手动释放以节省内存）
+     */
+    public ReleaseAsset(bundleRes:string, assetsRes:string, assetType?:any) {
+        const cacheKey = `${bundleRes}/${assetsRes}/${assetType?.name ?? 'Asset'}`;
+        const asset = this.cachedAssets.get(cacheKey);
+        if (asset) {
+            this.cachedAssets.delete(cacheKey);
+            const bundle = this.bundles.get(bundleRes);
+            if (bundle) {
+                bundle.release(assetsRes, assetType);
+            }
+        }
     }
 
     public LoadAssetsFromBundle(bundleRes:string, assetsRes:string) : Promise<Asset> {   
